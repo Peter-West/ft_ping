@@ -6,6 +6,16 @@ void	ft_error(char *err)
 	exit(EXIT_FAILURE);
 }
 
+void	init_sock(t_env *e)
+{
+	int	ttl = 64;
+
+	if ((e->sockfd = socket(AF_INET, SOCK_RAW | SOCK_NONBLOCK, IPPROTO_ICMP)) < 0)
+		perror("socket");
+	if (setsockopt(e->sockfd, IPPROTO_IP, IP_TTL, (void*)&ttl, sizeof(ttl)) < 0)
+		perror("setsockopt");
+}
+
 struct addrinfo		*addr_infos(char **argv)
 {
 	static struct addrinfo *res;
@@ -32,8 +42,8 @@ void	init_req(t_env *e)
 	int					j = 0;
 	struct timeval		tv;
 
-	char	buf[256];
-	unsigned long hmm;
+	// char				buf[256];
+	// unsigned long		hmm;
 
 	icmpreq.imcp_hdr.type = 8;
 	icmpreq.imcp_hdr.code = 0;
@@ -41,9 +51,9 @@ void	init_req(t_env *e)
 	icmpreq.imcp_hdr.id = id;
 	icmpreq.imcp_hdr.seqnum = seq++;
 	if (gettimeofday(&tv, NULL) == 0)
-		printf("gettimeofday success\n");
-	else
-		perror("gettimeofday");
+		// printf("gettimeofday success\n");
+	// else
+		// perror("gettimeofday");
 	icmpreq.tv = tv;
 	ft_bzero(icmpreq.data, REQ_DATASIZE);
 	while (i < REQ_DATASIZE) {
@@ -52,57 +62,47 @@ void	init_req(t_env *e)
 		icmpreq.data[i] = 'a' + j;
 		i++;
 		j++;
-	}
-	
+	}	
 	icmpreq.imcp_hdr.chksm = in_ping_cksum((uint16_t *)&icmpreq, sizeof(t_icmp_req));
 	e->icmpreq = &icmpreq;
-	printf("chksum : %d\n", icmpreq.imcp_hdr.chksm);
-	hmm = ((struct sockaddr_in *)(e->res->ai_addr))->sin_addr.s_addr;
-	inet_ntop(AF_INET, &hmm, buf, 256);
-	perror("inet_ntop");
-	printf("Address : %s\n", buf);
-
-	int	ttl = 64;
-
-	if ((e->sockfd = socket(AF_INET, SOCK_RAW | SOCK_NONBLOCK, IPPROTO_ICMP)) < 0)
-		perror("socket");
-	if (setsockopt(e->sockfd, IPPROTO_IP, IP_TTL, (void*)&ttl, sizeof(ttl)) < 0)
-		perror("setsockopt");
-
-
+	// printf("chksum : %d\n", icmpreq.imcp_hdr.chksm);
+	// hmm = ((struct sockaddr_in *)(e->res->ai_addr))->sin_addr.s_addr;
+	// inet_ntop(AF_INET, &hmm, buf, 256);
+	// perror("inet_ntop");
+	// printf("Address : %s\n", buf);
 }
 
 void	send_req(t_env *e)
 {	
 	ssize_t	ret;
-	ret = sendto(e->sockfd, (void*)&e->icmpreq, sizeof(t_icmp_req), 0, e->res->ai_addr, e->res->ai_addrlen);
+
+	ret = sendto(e->sockfd, (void*)e->icmpreq, sizeof(t_icmp_req), 0, e->res->ai_addr, e->res->ai_addrlen);
 	if (ret < 0)
 		perror("sendto");
-	else
-		printf("ret sendto : %zu\n", ret);
+	// else
+		// printf("ret sendto : %zu\n", ret);
 }
 
-int		timer = 2;
 
 void	read_msg(char *read)
 {
 	t_ip_hdr	*iphdr;
 	t_icmp_req	*reply;
 
-
 	iphdr = (t_ip_hdr*)read;
-	printf("ttl : %d\n", iphdr->ttl);
+	// printf("ttl : %d\n", iphdr->ttl);
+	// printf("hdr_checksum : %d\n", iphdr->hdr_chksum);
 
 	unsigned long	hmm;
 	char			buf[64];
 
 	hmm = ((struct in_addr *)&(iphdr->src_addr))->s_addr;
 	inet_ntop(AF_INET, &hmm, buf, 64);
-	printf("src addr : %s\n", buf);
-	
-	reply = (t_icmp_req*)(read + sizeof(t_ip_hdr));
-	printf("type : %d\n",reply->imcp_hdr.type);
-	printf("payload : %s\n", reply->data);
+	// printf("src addr : %s\n", buf);
+
+	reply = (t_icmp_req*)((void*)read + sizeof(t_ip_hdr));
+	// printf("type : %d\n",reply->imcp_hdr.type);
+	// printf("payload : %s\n", reply->data);
 
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
@@ -111,11 +111,18 @@ void	read_msg(char *read)
 	// printf("time usec now %ld\n", tv.tv_usec);
 	// printf("time sec now %ld\n", tv.tv_sec);
 	// // if (tv.tv_usec - reply->tv.tv_usec)
-	printf("time between : %ld\n", tv.tv_usec - reply->tv.tv_usec);
+	// printf("time between : %ld\n", tv.tv_usec - reply->tv.tv_usec);
 
-	printf("%zu bytes from %s: icmp_seq=%d ttl=%d time=%ld ms\n", ft_strlen(reply->data), 
-		buf, reply->imcp_hdr.seqnum, iphdr->ttl, (tv.tv_usec - reply->tv.tv_usec)/1000);
+	long int	diff = (tv.tv_usec - reply->tv.tv_usec);
+
+	if (diff < 0)
+		diff = diff + 1000000;
+
+	printf("%zu bytes from %s: icmp_seq=%d ttl=%d time=%f ms\n", ft_strlen(reply->data), 
+		buf, reply->imcp_hdr.seqnum, iphdr->ttl, (float)(diff)/1000.0);
 }
+
+int		timer = 2;
 
 void	Alarm_handler(int sig)
 {
@@ -129,7 +136,7 @@ void	alarm_sig(t_env *e)
 
 	signal(SIGALRM, Alarm_handler);
 	ret = alarm(5);
-		
+	timer = 2;		
 	while (1)
 	{
 		if (timer == 0)
@@ -157,8 +164,7 @@ void	recv_reply(t_env *e)
 	msg.msg_flags = 0;
 	if ((ret_recv = recvmsg(e->sockfd, &msg, 0)) > 0)
 	{
-		printf("ret_recv : %zu\n", ret_recv);
-		printf("size buff : %lu\n", sizeof(buff));
+		// printf("ret_recv : %zu\n", ret_recv);
 		read_msg(buff);
 		timer = 0;
 	}
@@ -199,9 +205,9 @@ int		main(int argc, char **argv)
 	if (argc != 2)
 		ft_error(ARGS);
 	e.res = addr_infos(argv);
-	init_req(&e);
-	printf("ptrcmp : %p\n", e.icmpreq);
+	init_sock(&e);
 	while (1) {
+		init_req(&e);
 		send_req(&e);
 		alarm_sig(&e);
 		sleep(1);
